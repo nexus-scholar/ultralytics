@@ -12,6 +12,7 @@ import torch.nn as nn
 
 from ultralytics.nn.autobackend import check_class_names
 from ultralytics.nn.modules import (
+    WTConv, UIB, MobileMQA, CARAFE, EMA, GSConv, LSKA, SimAM, DySample,
     AIFI,
     C1,
     C2,
@@ -1574,6 +1575,16 @@ def parse_model(d, ch, verbose=True):
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     base_modules = frozenset(
         {
+            WTConv,
+            UIB,
+            MobileMQA,
+            CARAFE,
+            EMA,
+            GSConv,
+            LSKA,
+            SimAM,
+            DySample,
+
             Classify,
             Conv,
             ConvTranspose,

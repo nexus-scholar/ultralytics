@@ -18,6 +18,16 @@ Examples:
 """
 
 from .block import (
+    WTConv,
+    UIB,
+    MobileMQA,
+    CARAFE,
+    EMA,
+    GSConv,
+    LSKA,
+    SimAM,
+    DySample,
+
     C1,
     C2,
     C2PSA,
@@ -107,6 +117,16 @@ from .transformer import (
 )
 
 __all__ = (
+    "WTConv",
+    "UIB",
+    "MobileMQA",
+    "CARAFE",
+    "EMA",
+    "GSConv",
+    "LSKA",
+    "SimAM",
+    "DySample",
+
     "AIFI",
     "C1",
     "C2",

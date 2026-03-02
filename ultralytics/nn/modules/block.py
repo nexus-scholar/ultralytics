@@ -2065,3 +2065,201 @@ class RealNVP(nn.Module):
             self.float()
         z, log_det = self.backward_p(x)
         return self.prior.log_prob(z) + log_det
+
+
+# ==============================================================================
+# Custom Modules for Agricultural Edge-Deployment
+# ==============================================================================
+
+class WTConv(nn.Module):
+    """Wavelet Transform Convolution using Haar Wavelet."""
+    def __init__(self, c1, c2, k=3, s=1):
+        super().__init__()
+        self.conv = Conv(c1 * 4, c2, k, s)
+
+    def forward(self, x):
+        x0 = x[:, :, 0::2, 0::2]
+        x1 = x[:, :, 1::2, 0::2]
+        x2 = x[:, :, 0::2, 1::2]
+        x3 = x[:, :, 1::2, 1::2]
+        
+        LL = x0 + x1 + x2 + x3  # Shape
+        HL = x0 - x1 + x2 - x3  # Vertical
+        LH = x0 + x1 - x2 - x3  # Horizontal
+        HH = x0 - x1 - x2 + x3  # Diagonal
+        
+        out = torch.cat([LL, HL, LH, HH], dim=1) 
+        return self.conv(out)
+
+class UIB(nn.Module):
+    """Universal Inverted Bottleneck."""
+    def __init__(self, c1, c2, expand_ratio=4, b1=True, b2=True):
+        super().__init__()
+        self.use_res_connect = c1 == c2
+        hidden_dim = int(round(c1 * expand_ratio))
+        
+        layers = []
+        if b1:
+            layers.append(Conv(c1, c1, 3, 1, 1, g=c1)) 
+        
+        layers.append(Conv(c1, hidden_dim, 1, 1, 0))   
+        
+        if b2:
+            layers.append(Conv(hidden_dim, hidden_dim, 3, 1, 1, g=hidden_dim)) 
+            
+        layers.append(nn.Conv2d(hidden_dim, c2, 1, 1, 0, bias=False)) 
+        layers.append(nn.BatchNorm2d(c2))
+        
+        self.conv = nn.Sequential(*layers)
+
+    def forward(self, x):
+        if self.use_res_connect:
+            return x + self.conv(x)
+        return self.conv(x)
+
+class MobileMQA(nn.Module):
+    """Memory-Lean Multi-Query Attention."""
+    def __init__(self, dim, num_heads=8):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.scale = self.head_dim ** -0.5
+        
+        self.q_proj = nn.Conv2d(dim, dim, 1)
+        self.k_proj = nn.Conv2d(dim, self.head_dim, 1) 
+        self.v_proj = nn.Conv2d(dim, self.head_dim, 1) 
+        self.out_proj = nn.Conv2d(dim, dim, 1)
+        self.pool = nn.AvgPool2d(2, 2) 
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        q = self.q_proj(x).view(B, self.num_heads, self.head_dim, H * W).transpose(-2, -1)
+        
+        kv_x = self.pool(x)
+        kv_H, kv_W = kv_x.shape[2:]
+        k = self.k_proj(kv_x).view(B, 1, self.head_dim, kv_H * kv_W)
+        v = self.v_proj(kv_x).view(B, 1, self.head_dim, kv_H * kv_W).transpose(-2, -1)
+        
+        attn = (q @ k) * self.scale
+        attn = attn.softmax(dim=-1)
+        
+        out = (attn @ v).transpose(-2, -1).reshape(B, C, H, W)
+        return x + self.out_proj(out)
+
+class CARAFE(nn.Module):
+    """Content-Aware ReAssembly of Features."""
+    def __init__(self, c, k_enc=3, k_up=5, up_factor=2):
+        super().__init__()
+        self.up_factor = up_factor
+        self.k_up = k_up
+        
+        self.compress = Conv(c, c // 4, 1, 1)
+        self.encoder = nn.Conv2d(c // 4, (up_factor ** 2) * (k_up ** 2), k_enc, padding=k_enc//2)
+        self.pixel_shuffle = nn.PixelShuffle(up_factor)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        content = F.interpolate(x, scale_factor=self.up_factor, mode='nearest')
+        
+        comp = self.compress(x)
+        kernels = self.encoder(comp)
+        kernels = self.pixel_shuffle(kernels) 
+        kernels = F.softmax(kernels, dim=1)
+        
+        unfold_content = F.unfold(content, self.k_up, padding=self.k_up//2)
+        unfold_content = unfold_content.view(B, C, self.k_up**2, H*self.up_factor, W*self.up_factor)
+        
+        out = (unfold_content * kernels.unsqueeze(1)).sum(dim=2)
+        return out
+
+class EMA(nn.Module):
+    """Efficient Multi-Scale Attention Module."""
+    def __init__(self, channels, factor=32):
+        super().__init__()
+        self.groups = max(1, channels // factor)
+        self.conv1 = nn.Conv2d(channels, channels, 1)
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, groups=self.groups)
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+        self.conv3 = nn.Conv2d(channels, channels, 1)
+        
+    def forward(self, x):
+        B, C, H, W = x.shape
+        x1 = self.conv1(x)
+        x2 = self.conv2(x)
+        
+        h_pool = self.pool_h(x1)
+        w_pool = self.pool_w(x1).permute(0, 1, 3, 2)
+        
+        cat_pool = torch.cat([h_pool, w_pool], dim=2)
+        attn = self.conv3(cat_pool).sigmoid()
+        
+        attn_h, attn_w = torch.split(attn, [H, W], dim=2)
+        attn_w = attn_w.permute(0, 1, 3, 2)
+        
+        return x2 * attn_h * attn_w + x1
+
+class GSConv(nn.Module):
+    """Ghost Shuffle Convolution."""
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):
+        super().__init__()
+        c_ = c2 // 2
+        self.cv1 = Conv(c1, c_, k, s, p, g, act=act)
+        self.cv2 = Conv(c_, c_, 5, 1, 2, g=c_, act=act) 
+
+    def forward(self, x):
+        x1 = self.cv1(x)
+        x2 = self.cv2(x1)
+        out = torch.cat((x1, x2), 1)
+        
+        b, c, h, w = out.shape
+        out = out.view(b, 2, c // 2, h, w).transpose(1, 2).reshape(b, c, h, w)
+        return out
+
+class LSKA(nn.Module):
+    """Large Separable Kernel Attention."""
+    def __init__(self, dim, k_size=21):
+        super().__init__()
+        d = (k_size - 1) // 3
+        
+        self.conv0_h = nn.Conv2d(dim, dim, (1, 3), 1, (0, 1), groups=dim)
+        self.conv0_v = nn.Conv2d(dim, dim, (3, 1), 1, (1, 0), groups=dim)
+        
+        self.conv_spatial_h = nn.Conv2d(dim, dim, (1, 3), 1, (0, d), groups=dim, dilation=d)
+        self.conv_spatial_v = nn.Conv2d(dim, dim, (3, 1), 1, (d, 0), groups=dim, dilation=d)
+        
+        self.conv1 = nn.Conv2d(dim, dim, 1)
+
+    def forward(self, x):
+        u = x.clone()
+        attn = self.conv0_h(x)
+        attn = self.conv0_v(attn)
+        attn = self.conv_spatial_h(attn)
+        attn = self.conv_spatial_v(attn)
+        attn = self.conv1(attn)
+        return u * attn
+
+class SimAM(nn.Module):
+    """Parameter-Free Attention."""
+    def __init__(self, e_lambda=1e-4):
+        super().__init__()
+        self.act = nn.Sigmoid()
+        self.e_lambda = e_lambda
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        n = w * h - 1
+        x_minus_mu_square = (x - x.mean(dim=[2, 3], keepdim=True)).pow(2)
+        y = x_minus_mu_square / (4 * (x_minus_mu_square.sum(dim=[2, 3], keepdim=True) / n + self.e_lambda)) + 0.5
+        return x * self.act(y)
+
+class DySample(nn.Module):
+    """ONNX-Safe Dynamic Upsampling."""
+    def __init__(self, in_channels, scale=2):
+        super().__init__()
+        self.scale = scale
+        self.proj = Conv(in_channels, in_channels * (scale ** 2), 1, 1)
+        self.ps = nn.PixelShuffle(scale)
+
+    def forward(self, x):
+        return self.ps(self.proj(x))
