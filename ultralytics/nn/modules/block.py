@@ -940,15 +940,10 @@ class AConv(nn.Module):
 class ADown(nn.Module):
     """ADown."""
 
-    def __init__(self, c1: int, c2: int):
-        print(f"DEBUG: ADown c1={c1}, c2={c2}, type_c2={type(c2)}")
-        """Initialize ADown module.
-
-        Args:
-            c1 (int): Input channels.
-            c2 (int): Output channels.
-        """
+    def __init__(self, c1, c2):
         super().__init__()
+        if isinstance(c2, list):
+            c2 = c2[0]
         self.c = c2 // 2
         self.cv1 = Conv(c1 // 2, self.c, 3, 2, 1)
         self.cv2 = Conv(c1 // 2, self.c, 1, 1, 0)
