@@ -2120,8 +2120,9 @@ class UIB(nn.Module):
 
 class MobileMQA(nn.Module):
     """Memory-Lean Multi-Query Attention."""
-    def __init__(self, dim, num_heads=8):
+    def __init__(self, c1, c2, num_heads=8):
         super().__init__()
+        dim = c1
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim ** -0.5
@@ -2149,8 +2150,9 @@ class MobileMQA(nn.Module):
 
 class CARAFE(nn.Module):
     """Content-Aware ReAssembly of Features."""
-    def __init__(self, c, k_enc=3, k_up=5, up_factor=2):
+    def __init__(self, c1, c2, k_enc=3, k_up=5, up_factor=2):
         super().__init__()
+        c = c1
         self.up_factor = up_factor
         self.k_up = k_up
         
@@ -2175,8 +2177,9 @@ class CARAFE(nn.Module):
 
 class EMA(nn.Module):
     """Efficient Multi-Scale Attention Module."""
-    def __init__(self, channels, factor=32):
+    def __init__(self, c1, c2, factor=32):
         super().__init__()
+        channels = c1
         self.groups = max(1, channels // factor)
         self.conv1 = nn.Conv2d(channels, channels, 1)
         self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, groups=self.groups)
@@ -2219,8 +2222,9 @@ class GSConv(nn.Module):
 
 class LSKA(nn.Module):
     """Large Separable Kernel Attention."""
-    def __init__(self, dim, k_size=21):
+    def __init__(self, c1, c2, k_size=21):
         super().__init__()
+        dim = c1
         d = (k_size - 1) // 3
         
         self.conv0_h = nn.Conv2d(dim, dim, (1, 3), 1, (0, 1), groups=dim)
@@ -2242,7 +2246,7 @@ class LSKA(nn.Module):
 
 class SimAM(nn.Module):
     """Parameter-Free Attention."""
-    def __init__(self, e_lambda=1e-4):
+    def __init__(self, c1, c2, e_lambda=1e-4):
         super().__init__()
         self.act = nn.Sigmoid()
         self.e_lambda = e_lambda
@@ -2256,11 +2260,30 @@ class SimAM(nn.Module):
 
 class DySample(nn.Module):
     """ONNX-Safe Dynamic Upsampling."""
-    def __init__(self, in_channels, scale=2):
+    def __init__(self, c1, c2, scale=2):
         super().__init__()
+        in_channels = c1
         self.scale = scale
         self.proj = Conv(in_channels, in_channels * (scale ** 2), 1, 1)
         self.ps = nn.PixelShuffle(scale)
 
     def forward(self, x):
         return self.ps(self.proj(x))
+
+
+class C3_UIB(nn.Module):
+    """CSP Bottleneck with Universal Inverted Bottleneck (UIB)."""
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)  # optional act=FReLU(c2)
+        
+        # Replace the standard Bottleneck with MobileNetV4's UIB
+        # We use expand_ratio=2 to keep parameters low within the CSP structure
+        self.m = nn.Sequential(*(UIB(c_, c_, expand_ratio=2, b1=True, b2=True) for _ in range(n)))
+
+    def forward(self, x):
+        """Forward pass through the CSP bottleneck with UIB."""
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))

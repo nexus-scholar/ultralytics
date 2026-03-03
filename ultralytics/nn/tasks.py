@@ -12,7 +12,7 @@ import torch.nn as nn
 
 from ultralytics.nn.autobackend import check_class_names
 from ultralytics.nn.modules import (
-    WTConv, UIB, MobileMQA, CARAFE, EMA, GSConv, LSKA, SimAM, DySample,
+    WTConv, UIB, MobileMQA, CARAFE, EMA, GSConv, LSKA, SimAM, DySample, C3_UIB,
     AIFI,
     C1,
     C2,
@@ -1583,7 +1583,8 @@ def parse_model(d, ch, verbose=True):
             GSConv,
             LSKA,
             SimAM,
-            DySample,
+            DySample, C3_UIB,
+            C3_UIB,
 
             Classify,
             Conv,

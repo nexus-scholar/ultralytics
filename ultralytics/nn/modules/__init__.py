@@ -27,6 +27,7 @@ from .block import (
     LSKA,
     SimAM,
     DySample,
+    C3_UIB,
 
     C1,
     C2,
@@ -126,6 +127,7 @@ __all__ = (
     "LSKA",
     "SimAM",
     "DySample",
+    "C3_UIB",
 
     "AIFI",
     "C1",
