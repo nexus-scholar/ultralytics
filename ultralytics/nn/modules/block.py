@@ -941,6 +941,7 @@ class ADown(nn.Module):
     """ADown."""
 
     def __init__(self, c1: int, c2: int):
+        print(f"DEBUG: ADown c1={c1}, c2={c2}, type_c2={type(c2)}")
         """Initialize ADown module.
 
         Args:
