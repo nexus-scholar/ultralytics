@@ -2171,32 +2171,40 @@ class CARAFE(nn.Module):
         return out
 
 class EMA(nn.Module):
-    """Efficient Multi-Scale Attention Module."""
+    """Efficient Multi-Scale Attention (EMA) Module (Ouyang et al., 2023)."""
     def __init__(self, c1, c2, factor=32):
         super().__init__()
-        channels = c1
-        self.groups = max(1, channels // factor)
-        self.conv1 = nn.Conv2d(channels, channels, 1)
-        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, groups=self.groups)
+        self.groups = factor
+        self.conv1x1 = nn.Conv2d(c1 // self.groups, c1 // self.groups, kernel_size=1)
+        self.conv3x3 = nn.Conv2d(c1 // self.groups, c1 // self.groups, kernel_size=3, padding=1, groups=c1 // self.groups)
         self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
         self.pool_w = nn.AdaptiveAvgPool2d((1, None))
-        self.conv3 = nn.Conv2d(channels, channels, 1)
-        
+        self.gn = nn.GroupNorm(c1 // self.groups, c1 // self.groups)
+
     def forward(self, x):
-        B, C, H, W = x.shape
-        x1 = self.conv1(x)
-        x2 = self.conv2(x)
+        b, c, h, w = x.shape
+        x_group = x.view(b * self.groups, -1, h, w) # [B*G, C//G, H, W]
         
-        h_pool = self.pool_h(x1)
-        w_pool = self.pool_w(x1).permute(0, 1, 3, 2)
+        # Branch 1: 1x1 Conv
+        x1 = self.conv1x1(x_group)
         
-        cat_pool = torch.cat([h_pool, w_pool], dim=2)
-        attn = self.conv3(cat_pool).sigmoid()
+        # Branch 2: 3x3 DW Conv
+        x2 = self.conv3x3(x_group)
         
-        attn_h, attn_w = torch.split(attn, [H, W], dim=2)
-        attn_w = attn_w.permute(0, 1, 3, 2)
+        # Global Information Encoding
+        x_h = self.pool_h(x1) 
+        x_w = self.pool_w(x1).permute(0, 1, 3, 2) 
         
-        return x2 * attn_h * attn_w + x1
+        # Fusion
+        y = torch.cat([x_h, x_w], dim=2) 
+        y = self.gn(y)
+        y_h, y_w = torch.split(y, [h, w], dim=2)
+        y_w = y_w.permute(0, 1, 3, 2) 
+        
+        attn = (y_h.sigmoid() * y_w.sigmoid())
+        out = x2 * attn
+        
+        return out.view(b, c, h, w)
 
 class GSConv(nn.Module):
     """Ghost Shuffle Convolution."""

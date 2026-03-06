@@ -1583,7 +1583,7 @@ def parse_model(d, ch, verbose=True):
             GSConv,
             LSKA,
             SimAM,
-            DySample, C3_UIB,
+            DySample,
             C3_UIB,
 
             Classify,
