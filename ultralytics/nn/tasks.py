@@ -1659,8 +1659,8 @@ def parse_model(d, ch, verbose=True):
             if c2 != nc:  # if c2 != nc (e.g., Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
             
-            # Attention modules usually preserve channels (c2 = c1)
-            if m in {EMA, SimAM, LSKA}:
+            # Attention and Dynamic Upsampling modules preserve channels (c2 = c1)
+            if m in {EMA, SimAM, LSKA, DySample}:
                 c2 = c1
             if m is C2fAttn:  # set 1) embed channels and 2) num heads
                 args[1] = make_divisible(min(args[1], max_channels // 2) * width, 8)
