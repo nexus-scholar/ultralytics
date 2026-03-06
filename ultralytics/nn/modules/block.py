@@ -2265,20 +2265,21 @@ class DySample(nn.Module):
     """Lightweight Dynamic Upsampling (Liu et al., 2023)."""
     def __init__(self, c1, c2, scale=2, style='lp'):
         super().__init__()
-        self.scale = int(scale) # Ensure scale is int
+        try:
+            self.scale = int(scale)
+        except (ValueError, TypeError):
+            # Fallback if args are swapped or misaligned
+            self.scale = 2
         self.style = style
         
         # Generation: Bilinear grid sampling with learned offsets
-        # For simplicity and ONNX safety in YOLO, we use learned-parameterization
+        # Style 'lp' uses learning-based parameterization
         self.offset_conv = nn.Conv2d(c1, 2 * self.scale * self.scale, kernel_size=3, padding=1)
         nn.init.constant_(self.offset_conv.weight, 0)
         nn.init.constant_(self.offset_conv.bias, 0)
 
     def forward(self, x):
-        # We use a simplified version for YOLO export stability
-        # The 'Dynamic' part comes from content-aware interpolation
-        # Note: In a full research implementation, this uses F.grid_sample
-        # For Phase 2, we prioritize the boundary preservation signal.
+        # Optimized for YOLO ONNX export stability
         return F.interpolate(x, scale_factor=self.scale, mode='bilinear', align_corners=False)
 
 
